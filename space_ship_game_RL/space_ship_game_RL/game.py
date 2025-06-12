@@ -3,6 +3,7 @@ import pygame
 import random 
 import os
 from setting import *
+import numpy as np
 
 # 遊戲初始化 and 創建視窗
 pygame.init()
@@ -13,6 +14,8 @@ from power import Power
 from explosion import Explosion
 from rock import Rock
 from player import Player
+from collections import deque
+
 
 
 # 載入圖片
@@ -39,7 +42,7 @@ pygame.mixer.music.play(-1)
 font_name = os.path.join(BASE_PATH, "font.ttf")
 
 class Game:
-    def __init__(self):
+    def __init__(self, frame_stack=4):
         self.running = True
         self.player = pygame.sprite.GroupSingle()
         self.player.add(Player())
@@ -48,11 +51,20 @@ class Game:
         for i in range(8):
             self.new_rock()
         self.powers = pygame.sprite.Group()
-
         self.score = 0
         self.surface = pygame.Surface((WIDTH, HEIGHT))  # 用來 off-screen 畫畫的
-        self.state = pygame.surfarray.array3d(self.surface)
         self.action = 0
+
+        state = pygame.surfarray.array3d(self.surface)
+        self.frame_stack = frame_stack
+        self.state_stack = deque([state]*frame_stack, maxlen=frame_stack)
+        # 初始化堆疊後的狀態
+        self.stacked_state = np.concatenate(list(self.state_stack), axis=2)
+        # self.state = state
+
+    def get_stacked_state(self):
+        # 回傳 shape=(frame_stack, H, W, 3)
+        return np.stack(self.frame_stack, axis=0)    
 
              
     def draw_text(self, surf, text, size, x, y):
@@ -140,7 +152,18 @@ class Game:
         self.player.update(action)
         self.check_for_collisions()
 
+        # 更新最新一幀
+        surface = pygame.Surface((WIDTH, HEIGHT))
+        surface.fill(BLACK)
+        surface.blit(background_img, (0, 0))
+        self.all_sprites.draw(surface)
+        self.player.draw(surface)
+        stacked = pygame.surfarray.array3d(surface)
+        # deque 自動丟入新幀、pop 舊幀
+        self.state_stack.append(stacked)
+
     def draw(self, screen=None):
+        # 合成畫面
         surface = self.surface if screen is None else screen
         surface.fill(BLACK)
         surface.blit(background_img, (0, 0))
@@ -151,11 +174,17 @@ class Game:
         self.draw_health(surface, self.player.sprite.health, 5, 15)
         self.draw_lives(surface, self.player.sprite.lives, player_mini_img, WIDTH - 100, 15)
 
-        # 更新 state
-        self.state = pygame.surfarray.array3d(surface)
+        # 1) 先產生最新單張 frame
+        new_state = pygame.surfarray.array3d(surface)
+        # 2) 更新單張 state（若其他地方還用得到）
+        self.state = new_state
+        # 3) 把最新一張 append 進 deque
+        self.state_stack.append(new_state)
+        # 4) 同時把多 frame 堆疊成一個 array
+        #    axis=2 把 channel dimension 疊起來 → shape = (W, H, C * frame_stack)
+        # 沿 channel（third axis）把 frame 拼在一起 → shape = (W, H, 3*frame_stack)
+        self.stacked_state = np.concatenate(list(self.state_stack), axis=2)
 
         # 只有 render 模式才更新視窗
         if screen is not None:
             pygame.display.update()
-
-
