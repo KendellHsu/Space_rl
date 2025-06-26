@@ -10,6 +10,17 @@ MAX_SPD_Y  = 10
 RADIUS_CLASS = {5: 0, 8: 1, 9: 2, 21: 3, 25: 4}   # 半徑→類別
 NUM_RAD_CLS  = 5
 
+# ---- 超參數（一次集中管理） ----
+TIME_PENALTY = -0.4
+ALPHA_HIT      = 0.5           
+LAMBDA_COLL    = 1.0           # 撞擊倍率
+# ---- 冷卻期 shaping ----
+MISS_SHOT_PENALTY = -1     # 空槍
+COOLDOWN_BONUS    = 0.5     # 射後等待
+GAMMA_SHIELD = 1.0
+REWARD_SCALE = 0.7 
+
+
 class SpaceShipEnv():
     def __init__(self):
         pygame.init()
@@ -27,8 +38,6 @@ class SpaceShipEnv():
 
         self.in_cooldown = False                 # 自行在 __init__ 加這旗標
         self.cooldown_penalized = True           # 同上
-
-
 
     def _extract_state(self):
         p = self.game.player.sprite
@@ -77,15 +86,7 @@ class SpaceShipEnv():
             dtype=np.float32
         )
         return state_vec
-
-    # ---- 超參數（一次集中管理） ----
-    ALPHA_HIT      = 1.8           
-    LAMBDA_COLL    = 1.4           # 撞擊倍率
-    # ---- 冷卻期 shaping ----
-    MISS_SHOT_PENALTY = -1     # 空槍
-    COOLDOWN_BONUS    = 0.5     # 射後等待
-    GAMMA_SHIELD = 1.3
-
+    
     def step(self, action):
         # ----- 0. 撞擊前狀態 -----
         player       = self.game.player.sprite
@@ -107,24 +108,24 @@ class SpaceShipEnv():
             self.clock.tick(self.fps)
 
         # ----- 2. 計算 reward -----
-        reward = -0.4       # 基礎時間懲罰
+        reward = TIME_PENALTY       # 基礎時間懲罰
 
         # (a) 擊破石頭
         delta_score = self.game.score - score_before
-        reward += self.ALPHA_HIT * delta_score
+        reward += ALPHA_HIT * delta_score
 
         # (b) 撞擊懲罰（半徑 × 剩餘血量因子）
         if self.game.is_collided:
             hp_after  = self.game.player.sprite.health
             radius    = hp_before - hp_after                # = damage = radius
             factor    = 2 - hp_after / 100                  # 滿血1 → 殘血2
-            penalty   = self.LAMBDA_COLL * radius * factor
+            penalty   = LAMBDA_COLL * radius * factor
             reward   -= penalty
 
         # (c) 撿道具（依前述 shield +γ·hp_gain, gun +5）
         if self.game.is_power:
             hp_gain = self.game.player.sprite.health - hp_before
-            reward += hp_gain * self.GAMMA_SHIELD          # shield +20 * gamma
+            reward += hp_gain * GAMMA_SHIELD          # shield +20 * gamma
             if hp_gain == 0:                               # gun
                 reward += 12
 
@@ -136,19 +137,19 @@ class SpaceShipEnv():
 
         if was_shooting and not ready_before:       # 狂按但未射出
             if not self.cooldown_penalized:
-                reward += self.MISS_SHOT_PENALTY         # 只扣一次
+                reward += MISS_SHOT_PENALTY         # 只扣一次
                 self.cooldown_penalized = True
 
         # -- 冷卻結束：加一次 --
         if self.in_cooldown and ready_after:
-            reward += self.COOLDOWN_BONUS
+            reward += COOLDOWN_BONUS
             self.in_cooldown = False                # 重置旗標
 
         # ----- 3. 其餘回傳 -----
         done  = (not self.game.running) or (self.game.score >= 10000)
         info  = self.game.score
         state = self._extract_state()
-
+        reward = reward * REWARD_SCALE
         return state, reward, done, info
 
     def reset(self):
