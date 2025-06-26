@@ -3,6 +3,7 @@ import numpy as np
 from setting import *
 from game import Game
 
+# ---- state ----
 MAX_ROCK   = 8
 MAX_POWER  = 2
 MAX_SPD_X  = 3
@@ -10,15 +11,39 @@ MAX_SPD_Y  = 10
 RADIUS_CLASS = {5: 0, 8: 1, 9: 2, 21: 3, 25: 4}   # 半徑→類別
 NUM_RAD_CLS  = 5
 
-# ---- 超參數（一次集中管理） ----
-TIME_PENALTY = -0.4
-ALPHA_HIT      = 0.5           
-LAMBDA_COLL    = 1.0           # 撞擊倍率
-# ---- 冷卻期 shaping ----
-MISS_SHOT_PENALTY = -1     # 空槍
-COOLDOWN_BONUS    = 0.5     # 射後等待
-GAMMA_SHIELD = 1.0
-REWARD_SCALE = 0.7 
+# ---- reward ----
+TIME_PENALTY_STAGES = [          # (分數上界, 對應 time_penalty)
+    (1000,  -0.25),
+    (3000,  -0.30),
+    (6000,  -0.35),
+    (10000, -0.4)
+]
+
+
+def get_time_penalty(score: int) -> float:
+    for upper, penalty in TIME_PENALTY_STAGES:
+        if score < upper:
+            return penalty        # 命中第一段就回傳
+    return TIME_PENALTY_STAGES[-1][1]   # 安全閥：理論上到不了這裡
+
+
+## 1. 擊破石頭
+ALPHA_HIT = 0.8
+PSI_MIN   = 0.4         # ψ(hp) = PSI_MIN + (1-PSI_MIN)*ϕ
+
+## 2. 撞擊
+BETA_COLL      = 1.2
+
+## 3. 道具
+GAMMA_SHIELD   = 1.4         # 補血 (殘血時再乘 (1-ϕ))
+R_GUN          = 16          # 槍強化一次性
+
+## 4. 冷卻 shaping
+MISS_SHOT_PEN  = -1.0
+COOLDOWN_BONUS = +0.5
+
+## 5. 總縮放
+REWARD_SCALE   = 1.0
 
 
 class SpaceShipEnv():
@@ -97,47 +122,52 @@ class SpaceShipEnv():
         
         # ----- 1. 更新遊戲 -----
         self.game.update(action)
-
-        ready_after  = player.bullet_ready          # ★update 後
-        fired_now    = was_shooting and ready_before  # 這幀真的發射
-
+        
         if self.screen is None:
-            self.game.draw()
+            # self.game.draw()
+            pass
         else:
             self.game.draw(self.screen)
             self.clock.tick(self.fps)
 
-        # ----- 2. 計算 reward -----
-        reward = TIME_PENALTY       # 基礎時間懲罰
+        # ========= REWARD SHAPING =========
+        reward = get_time_penalty(score_before)                    # 0. 每幀先扣
 
-        # (a) 擊破石頭
-        delta_score = self.game.score - score_before
-        reward += ALPHA_HIT * delta_score
+        ready_after  = player.bullet_ready
+        fired_now    = was_shooting and ready_before
+        hp_after  = player.health
 
-        # (b) 撞擊懲罰（半徑 × 剩餘血量因子）
+        ϕ  = hp_after / 100                           # 0~1
+        ψ  = PSI_MIN + (1.0 - PSI_MIN) * ϕ              # 0.4~1.0
+
+        # 1) 擊破石頭 -------------------------------------------------
+        delta_score = self.game.score - score_before    # 2*radius
+        if delta_score:                                 # 表示有石頭被擊破                    # radius
+            hit_bonus = ALPHA_HIT * delta_score * ψ
+            reward += hit_bonus
+
         if self.game.is_collided:
-            hp_after  = self.game.player.sprite.health
-            radius    = hp_before - hp_after                # = damage = radius
-            factor    = 2 - hp_after / 100                  # 滿血1 → 殘血2
-            penalty   = LAMBDA_COLL * radius * factor
-            reward   -= penalty
+            r  = hp_before - hp_after
+            factor   = 2 - ϕ             # 殘血懲罰放大
+            penalty  = BETA_COLL * r * factor
+            reward  -= penalty
 
-        # (c) 撿道具（依前述 shield +γ·hp_gain, gun +5）
+        # 3) 撿道具 ---------------------------------------------------
         if self.game.is_power:
-            hp_gain = self.game.player.sprite.health - hp_before
-            reward += hp_gain * GAMMA_SHIELD          # shield +20 * gamma
-            if hp_gain == 0:                               # gun
-                reward += 12
+            hp_gain = hp_after - hp_before
+            if hp_gain > 0:                             # 補血
+                reward += hp_gain * GAMMA_SHIELD * (1-ϕ)
+            else:                                       # 強化槍
+                reward += R_GUN
 
-
-        # -- 冷卻開始：扣一次 --
+        # 4) 射擊冷卻 -------------------------------------------------
         if fired_now:
             self.in_cooldown = True                 # 自行在 __init__ 加這旗標
             self.cooldown_penalized = False         # 同上
 
         if was_shooting and not ready_before:       # 狂按但未射出
             if not self.cooldown_penalized:
-                reward += MISS_SHOT_PENALTY         # 只扣一次
+                reward += MISS_SHOT_PEN
                 self.cooldown_penalized = True
 
         # -- 冷卻結束：加一次 --
