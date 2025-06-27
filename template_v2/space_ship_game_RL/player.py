@@ -46,6 +46,15 @@ class Player(pygame.sprite.Sprite):
         self.dt = clock.tick(FPS)  # 回傳毫秒
         self.bullet_delay = 60 # 每60偵射一次 one shoot / 60 frames
 
+    def _try_shoot(self):
+        """子彈就緒才射，並回傳是否真的射擊"""
+        if self.bullet_ready:
+            self.is_shooting = True
+            self.bullet_ready = False
+            self.shoot()
+            return True
+        return False
+    
     def update(self, action):
         self.bullet_group.update()
         self.recharge_bullet()
@@ -60,20 +69,35 @@ class Player(pygame.sprite.Sprite):
             self.rect.centerx = WIDTH / 2
             self.rect.bottom = HEIGHT - 10
 
+        # 0: nothing -------------------------------------------------
         if action == 0:
-            pass
-
-        if action == 1:
-            self.rect.x -= self.speedx
-        if action == 2:
-            self.rect.x += self.speedx
-
-        if action == 3 and self.bullet_ready:
-            self.is_shooting = True
-            self.bullet_ready = False
-            self.shoot()
-        else:
             self.is_shooting = False
+
+        # 1: shoot ---------------------------------------------------
+        elif action == 1:
+            shot = self._try_shoot()
+            if not shot:
+                self.is_shooting = False    # 冷卻中就只是空操作
+
+        # 2: move L --------------------------------------------------
+        elif action == 2:
+            self.rect.x -= self.speedx
+            self.is_shooting = False
+
+        # 3: move L + shoot -----------------------------------------
+        elif action == 3:
+            self.rect.x -= self.speedx
+            self._try_shoot()               # 無論有沒有射，移動一定發生
+
+        # 4: move R --------------------------------------------------
+        elif action == 4:
+            self.rect.x += self.speedx
+            self.is_shooting = False
+
+        # 5: move R + shoot -----------------------------------------
+        elif action == 5:
+            self.rect.x += self.speedx
+            self._try_shoot()
 
         if self.rect.right > WIDTH:
             self.rect.right = WIDTH

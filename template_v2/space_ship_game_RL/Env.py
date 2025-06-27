@@ -58,7 +58,7 @@ class SpaceShipEnv():
 
         self.game = Game()
 
-        self.action_space = [0, 1, 2, 3]
+        self.action_space = [0, 1, 2, 3, 4, 5]
         self.observation = self.game.state
 
         self.in_cooldown = False                 # 自行在 __init__ 加這旗標
@@ -113,7 +113,7 @@ class SpaceShipEnv():
         # ----- 0. 撞擊前狀態 -----
         player       = self.game.player.sprite
         ready_before = player.bullet_ready
-        was_shooting  = (action == 1)
+        was_shooting  = (action % 2)
         hp_before    = player.health    
         score_before = self.game.score
         
