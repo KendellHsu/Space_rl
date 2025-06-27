@@ -83,14 +83,11 @@ class SpaceShipEnv():
             dy = (r.rect.centery - p.rect.centery) / HEIGHT
             vx = r.speedx / MAX_SPD_X          # 約 -1~1
             vy = r.speedy / MAX_SPD_Y          # 約 0.2~1
-            
-            # --- 半徑 One-Hot (5 維) ---
-            cls     = RADIUS_CLASS.get(r.radius, 0)          # 0‥4
-            rad_oh  = [1 if i == cls else 0 for i in range(NUM_RAD_CLS)]
+            rr = r.radius
 
-            rock_feats += [dx, dy, vx, vy] + rad_oh          # 9 維/顆
+            rock_feats += [dx, dy, vx, vy, rr]
 
-        rock_feats += [0.0] * (MAX_ROCK * 9 - len(rock_feats))  # padding
+        rock_feats += [0.0] * (MAX_ROCK * 5 - len(rock_feats))  # padding
 
         # -------- 道具 (最近 2 顆) --------
         powers = sorted(self.game.powers,
@@ -131,7 +128,7 @@ class SpaceShipEnv():
             self.clock.tick(self.fps)
 
         # ========= REWARD SHAPING =========
-        reward = get_time_penalty(score_before)                    # 0. 每幀先扣
+        reward = -0.25                    # 0. 每幀先扣
 
         ready_after  = player.bullet_ready
         fired_now    = was_shooting and ready_before
@@ -175,6 +172,11 @@ class SpaceShipEnv():
             reward += COOLDOWN_BONUS
             self.in_cooldown = False                # 重置旗標
 
+        hit_left = (player.rect.left == 0 and action == 1)
+        hit_right = (player.rect.right == WIDTH and action == 2)
+        if hit_left or hit_right:
+            reward -= 0.5
+
         # ----- 3. 其餘回傳 -----
         done  = (not self.game.running) or (self.game.score >= 10000)
         info  = self.game.score
@@ -184,8 +186,8 @@ class SpaceShipEnv():
 
     def reset(self):
         self.game = Game()
-        self.in_cooldown = False          # ★
-        self.cooldown_penalized = True    # ★
+        self.in_cooldown = False
+        self.cooldown_penalized = True
         return self._extract_state()
 
     def render(self):
