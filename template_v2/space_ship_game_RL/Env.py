@@ -28,22 +28,18 @@ def get_time_penalty(score: int) -> float:
 
 
 ## 1. 擊破石頭
-ALPHA_HIT = 0.8
-PSI_MIN   = 0.4         # ψ(hp) = PSI_MIN + (1-PSI_MIN)*ϕ
+ALIVE_REWARD = 0.1
 
 ## 2. 撞擊
-BETA_COLL      = 1.2
+BETA_COLL      = 1.5
 
 ## 3. 道具
-GAMMA_SHIELD   = 1.4         # 補血 (殘血時再乘 (1-ϕ))
+GAMMA_SHIELD   = 0.3         # 補血 (殘血時再乘 (1-ϕ))
 R_GUN          = 16          # 槍強化一次性
 
 ## 4. 冷卻 shaping
 MISS_SHOT_PEN  = -1.0
 COOLDOWN_BONUS = +0.5
-
-## 5. 總縮放
-REWARD_SCALE   = 1.0
 
 
 class SpaceShipEnv():
@@ -131,20 +127,14 @@ class SpaceShipEnv():
             self.clock.tick(self.fps)
 
         # ========= REWARD SHAPING =========
-        reward = get_time_penalty(score_before)                    # 0. 每幀先扣
+        reward = (ALIVE_REWARD * hp_after) -3      # 0. 每幀先扣
 
         ready_after  = player.bullet_ready
         fired_now    = was_shooting and ready_before
         hp_after  = player.health
 
         ϕ  = hp_after / 100                           # 0~1
-        ψ  = PSI_MIN + (1.0 - PSI_MIN) * ϕ              # 0.4~1.0
-
-        # 1) 擊破石頭 -------------------------------------------------
-        delta_score = self.game.score - score_before    # 2*radius
-        if delta_score:                                 # 表示有石頭被擊破                    # radius
-            hit_bonus = ALPHA_HIT * delta_score * ψ
-            reward += hit_bonus
+        # ψ  = PSI_MIN + (1.0 - PSI_MIN) * ϕ              # 0.4~1.0
 
         if self.game.is_collided:
             r  = hp_before - hp_after
@@ -162,9 +152,8 @@ class SpaceShipEnv():
 
         # 4) 射擊冷卻 -------------------------------------------------
         if fired_now:
-            self.in_cooldown = True                 # 自行在 __init__ 加這旗標
-            self.cooldown_penalized = False         # 同上
-
+            self.in_cooldown = True
+            self.cooldown_penalized = False 
         if was_shooting and not ready_before:       # 狂按但未射出
             if not self.cooldown_penalized:
                 reward += MISS_SHOT_PEN
@@ -179,7 +168,7 @@ class SpaceShipEnv():
         done  = (not self.game.running) or (self.game.score >= 10000)
         info  = self.game.score
         state = self._extract_state()
-        reward = reward * REWARD_SCALE
+        reward = reward
         return state, reward, done, info
 
     def reset(self):
